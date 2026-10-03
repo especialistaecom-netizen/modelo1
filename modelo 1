@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Refrigerador 3D</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #d0d0d0;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    #info {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: #333;
+      background: rgba(255,255,255,0.7);
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 14px;
+      pointer-events: none;
+      user-select: none;
+      backdrop-filter: blur(4px);
+      z-index: 10;
+    }
+    #upload-panel {
+      position: absolute;
+      bottom: 30px;
+      right: 30px;
+      z-index: 10;
+      background: rgba(255,255,255,0.9);
+      padding: 16px 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      backdrop-filter: blur(6px);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border: 1px solid #ccc;
+      min-width: 160px;
+    }
+    #upload-panel .label {
+      font-size: 13px;
+      font-weight: bold;
+      color: #333;
+      text-align: center;
+      margin-bottom: 4px;
+    }
+    .upload-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #333;
+    }
+    .upload-row label {
+      cursor: pointer;
+      background: #0077cc;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-weight: bold;
+      transition: background 0.2s;
+      border: none;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .upload-row label:hover {
+      background: #005fa3;
+    }
+    .upload-row input[type="file"] {
+      display: none;
+    }
+    .upload-row .badge {
+      font-size: 11px;
+      color: #666;
+      flex: 1;
+      text-align: right;
+    }
+    #status {
+      position: absolute;
+      bottom: 30px;
+      left: 30px;
+      z-index: 10;
+      background: rgba(0,0,0,0.7);
+      color: #0f0;
+      padding: 6px 14px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: monospace;
+      pointer-events: none;
+      max-width: 300px;
+    }
+    @media (max-width: 600px) {
+      #upload-panel { bottom: 10px; right: 10px; padding: 12px; min-width: 130px; }
+      .upload-row { font-size: 11px; }
+      .upload-row label { padding: 3px 8px; font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="info">Arrastra para rotar - Scroll para zoom</div>
+  <div id="status">Listo</div>
+
+  <div id="upload-panel">
+    <div class="label">Subir imagen para:</div>
+    <div class="upload-row">
+      <label for="uploadDoor">Puerta</label>
+      <input type="file" id="uploadDoor" accept="image/*" />
+      <span class="badge" id="doorBadge">✔</span>
+    </div>
+    <div class="upload-row">
+      <label for="uploadLeft">Lateral izquierdo</label>
+      <input type="file" id="uploadLeft" accept="image/*" />
+      <span class="badge" id="leftBadge">✔</span>
+    </div>
+    <div class="upload-row">
+      <label for="uploadRight">Lateral derecho</label>
+      <input type="file" id="uploadRight" accept="image/*" />
+      <span class="badge" id="rightBadge">✔</span>
+    </div>
+    <div class="upload-row">
+      <label for="uploadSign">Cartel superior</label>
+      <input type="file" id="uploadSign" accept="image/*" />
+      <span class="badge" id="signBadge">✔</span>
+    </div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    const W = 120, H = 200, D = 86;
+    const DOOR_W = 56, DOOR_H = 140, DOOR_THICK = 4, DOOR_PROJ = 6;
+    const GRILLE_W = 100, GRILLE_H = 25, GRILLE_Y_BASE = 175;
+    const LEG_H = 6, LEG_RADIUS = 3.5;
+
+    const SIGN_W = 118;
+    const SIGN_H = 18;
+    const SIGN_THICK = 1.5;
+    const SIGN_OVER = 15;
+    const SIGN_Y_BASE = H - (SIGN_H - SIGN_OVER);
+    const SIGN_Y_CENTER = SIGN_Y_BASE + SIGN_H / 2;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xd0d0d0);
+
+    const camera = new THREE.PerspectiveCamera(25, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera.position.set(600, 350, 600);
+    camera.lookAt(0, 100, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 100, -10);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.minDistance = 200;
+    controls.maxDistance = 1500;
+    controls.update();
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.8);
+    mainLight.position.set(150, 300, 200);
+    mainLight.castShadow = true;
+    mainLight.shadow.mapSize.width = 1024;
+    mainLight.shadow.mapSize.height = 1024;
+    mainLight.shadow.camera.near = 10;
+    mainLight.shadow.camera.far = 800;
+    mainLight.shadow.camera.left = -200;
+    mainLight.shadow.camera.right = 200;
+    mainLight.shadow.camera.top = 200;
+    mainLight.shadow.camera.bottom = -200;
+    scene.add(mainLight);
+    scene.add(new THREE.DirectionalLight(0xccddff, 0.6).position.set(-100, 100, -50));
+    scene.add(new THREE.DirectionalLight(0xffffff, 0.4).position.set(0, 50, -250));
+
+    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.55, metalness: 0.05 });
+    const grilleMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.6, metalness: 0.1 });
+    const slatMat = new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.7, metalness: 0.1 });
+
+    const textureLoader = new THREE.TextureLoader();
+
+    // URLs actualizadas
+    const urlDoor = 'https://i.imgur.com/e5X9wNJ.png';
+    const urlLeft = 'https://i.imgur.com/L1AzeXw.png';
+    const urlRight = 'https://i.imgur.com/HOaEEN6.png';
+    const urlSign = 'https://i.imgur.com/ZNMBKx7.png';
+
+    const matRight = new THREE.MeshStandardMaterial({
+      map: textureLoader.load(urlRight),
+      color: 0xffffff,
+      roughness: 0.5,
+      metalness: 0.05,
+    });
+    const matLeft = new THREE.MeshStandardMaterial({
+      map: textureLoader.load(urlLeft),
+      color: 0xffffff,
+      roughness: 0.5,
+      metalness: 0.05,
+    });
+    const matTop = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.55, metalness: 0.05 });
+    const matBottom = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.55, metalness: 0.05 });
+    const matFront = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.55, metalness: 0.05 });
+    const matBack = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.55, metalness: 0.05 });
+
+    const bodyMaterials = [matRight, matLeft, matTop, matBottom, matFront, matBack];
+    const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), bodyMaterials);
+    body.position.set(0, H/2, -D/2);
+    body.castShadow = body.receiveShadow = true;
+    scene.add(body);
+
+    const doorMat = new THREE.MeshStandardMaterial({
+      map: textureLoader.load(urlDoor),
+      color: 0xffffff,
+      roughness: 0.5,
+      metalness: 0.05,
+    });
+    const door = new THREE.Mesh(new THREE.BoxGeometry(DOOR_W, DOOR_H, DOOR_THICK), doorMat);
+    const doorY = 50 + DOOR_H/2;
+    door.position.set(0, doorY, DOOR_PROJ - DOOR_THICK/2);
+    door.castShadow = door.receiveShadow = true;
+    scene.add(door);
+
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.5, metalness: 0.05 });
+    const fT = 0.8, fD = 0.6;
+    const frameParts = [
+      { w: DOOR_W+0.4, h: fT, x: 0, y: doorY + DOOR_H/2 - fT/2 },
+      { w: DOOR_W+0.4, h: fT, x: 0, y: doorY - DOOR_H/2 + fT/2 },
+      { w: fT, h: DOOR_H, x: -DOOR_W/2 - fT/2, y: doorY },
+      { w: fT, h: DOOR_H, x:  DOOR_W/2 + fT/2, y: doorY },
+    ];
+    for (const p of frameParts) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, fD), frameMat);
+      m.position.set(p.x, p.y, DOOR_PROJ - DOOR_THICK/2 - 0.1);
+      scene.add(m);
+    }
+
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7, metalness: 0.4 });
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(1.8, 12, 2.5), handleMat);
+    handle.position.set(DOOR_W/2 - 6, doorY, DOOR_PROJ + 0.8);
+    handle.castShadow = true;
+    scene.add(handle);
+
+    const bracketMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.3 });
+    for (const yOff of [-4, 4]) {
+      const bracket = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 2, 8), bracketMat);
+      bracket.position.set(DOOR_W/2 - 6, doorY + yOff, DOOR_PROJ - 0.2);
+      bracket.rotation.x = Math.PI/2;
+      scene.add(bracket);
+    }
+
+    const hingeMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.3 });
+    for (const yOff of [-45, 0, 45]) {
+      const hinge = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 2.5, 8), hingeMat);
+      hinge.position.set(-DOOR_W/2 - 1.2, doorY + yOff, DOOR_PROJ - DOOR_THICK/2);
+      hinge.rotation.x = Math.PI/2;
+      scene.add(hinge);
+    }
+
+    const grilleGroup = new THREE.Group();
+    const backPanel = new THREE.Mesh(new THREE.BoxGeometry(GRILLE_W, GRILLE_H, 0.8), whiteMat);
+    backPanel.position.set(0, GRILLE_Y_BASE + GRILLE_H/2, 0.4);
+    grilleGroup.add(backPanel);
+
+    const numSlats = 6;
+    const slatSpacing = (GRILLE_H - 2) / (numSlats - 1);
+    for (let i = 0; i < numSlats; i++) {
+      const yPos = GRILLE_Y_BASE + 1 + i * slatSpacing;
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(GRILLE_W - 8, 1.6, 2.0), slatMat);
+      slat.position.set(0, yPos, 1.2);
+      slat.castShadow = slat.receiveShadow = true;
+      grilleGroup.add(slat);
+    }
+    scene.add(grilleGroup);
+
+    const signMat = new THREE.MeshStandardMaterial({
+      map: textureLoader.load(urlSign),
+      color: 0xffffff,
+      roughness: 0.5,
+      metalness: 0.05,
+    });
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(SIGN_W, SIGN_H, SIGN_THICK), signMat);
+    sign.position.set(0, SIGN_Y_CENTER, SIGN_THICK/2);
+    sign.castShadow = true;
+    sign.receiveShadow = true;
+    scene.add(sign);
+
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0.1 });
+    const legPositions = [
+      [-W/2+10, -D/2+10], [W/2-10, -D/2+10],
+      [-W/2+10,  D/2-10], [W/2-10,  D/2-10]
+    ];
+    for (const [lx, lz] of legPositions) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(LEG_RADIUS, LEG_RADIUS*1.1, LEG_H, 12), legMat);
+      leg.position.set(lx, -LEG_H/2, -D/2 + lz);
+      leg.castShadow = leg.receiveShadow = true;
+      scene.add(leg);
+      const foot = new THREE.Mesh(new THREE.CylinderGeometry(LEG_RADIUS*1.3, LEG_RADIUS*1.3, 1.2, 12), legMat);
+      foot.position.set(lx, -LEG_H - 0.6, -D/2 + lz);
+      foot.castShadow = foot.receiveShadow = true;
+      scene.add(foot);
+    }
+
+    const baseSkirt = new THREE.Mesh(
+      new THREE.BoxGeometry(W-2, 2, D-2),
+      new THREE.MeshStandardMaterial({ color: 0xd0d0d0, roughness: 0.7 })
+    );
+    baseSkirt.position.set(0, 1, -D/2);
+    baseSkirt.castShadow = baseSkirt.receiveShadow = true;
+    scene.add(baseSkirt);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(600, 600),
+      new THREE.ShadowMaterial({ opacity: 0.2 })
+    );
+    ground.rotation.x = -Math.PI/2;
+    ground.position.set(0, -LEG_H - 0.5, -D/2);
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    const statusDiv = document.getElementById('status');
+
+    function loadTextureForMaterial(material, fileInput, badgeId, name) {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const imageUrl = URL.createObjectURL(file);
+      statusDiv.textContent = 'Cargando ' + name + '...';
+      statusDiv.style.color = '#ff0';
+      textureLoader.load(
+        imageUrl,
+        (texture) => {
+          material.map = texture;
+          material.needsUpdate = true;
+          material.color.set(0xffffff);
+          statusDiv.textContent = name + ' cargado';
+          statusDiv.style.color = '#0f0';
+          document.getElementById(badgeId).textContent = '✔';
+          URL.revokeObjectURL(imageUrl);
+        },
+        undefined,
+        (err) => {
+          statusDiv.textContent = 'Error en ' + name;
+          statusDiv.style.color = '#f00';
+          console.error(err);
+          URL.revokeObjectURL(imageUrl);
+        }
+      );
+    }
+
+    document.getElementById('uploadDoor').addEventListener('change', (e) => {
+      loadTextureForMaterial(doorMat, e.target, 'doorBadge', 'puerta');
+    });
+    document.getElementById('uploadLeft').addEventListener('change', (e) => {
+      loadTextureForMaterial(bodyMaterials[1], e.target, 'leftBadge', 'lateral izquierdo');
+    });
+    document.getElementById('uploadRight').addEventListener('change', (e) => {
+      loadTextureForMaterial(bodyMaterials[0], e.target, 'rightBadge', 'lateral derecho');
+    });
+    document.getElementById('uploadSign').addEventListener('change', (e) => {
+      loadTextureForMaterial(signMat, e.target, 'signBadge', 'cartel');
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
